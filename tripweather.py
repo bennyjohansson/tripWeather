@@ -240,22 +240,22 @@ def find_weather_along_route(origin, destination, start_date_time):
         
 
 # Example usage
-if __name__ == "__main__":
-    origin = "Sundsvall, Sweden"
-    destination = "Vilans Väg 5a, Danderyd, Sweden"
-    start_date = "2025-01-06"  # Specify the start date here
-    start_time = "09:00"  # Specify the start time here
+# if __name__ == "__main__":
+#     origin = "Sundsvall, Sweden"
+#     destination = "Vilans Väg 5a, Danderyd, Sweden"
+#     start_date = "2025-01-06"  # Specify the start date here
+#     start_time = "09:00"  # Specify the start time here
     
-    waypoints, steps = get_route_data_detailed(origin, destination)
+#     waypoints, steps = get_route_data_detailed(origin, destination)
 
-    #Printing the name of the city at the last waypoint
-    lat, lng = waypoints[-1]
-    print(f"Lat: {lat}, Lng: {lng}")
-    # city = get_city_name(lat, lng)
-    # print(f"City at the last waypoint: {city}")
+#     #Printing the name of the city at the last waypoint
+#     lat, lng = waypoints[-1]
+#     print(f"Lat: {lat}, Lng: {lng}")
+#     # city = get_city_name(lat, lng)
+#     # print(f"City at the last waypoint: {city}")
     
-    #converting the start date and start time to a datetime object
-    start_time = datetime(2025,1,6,10,0)
-    weather_route = find_weather_along_route(origin, destination, start_time)
+#     #converting the start date and start time to a datetime object
+#     start_time = datetime(2025,1,6,10,0)
+#     weather_route = find_weather_along_route(origin, destination, start_time)
     
-    print (weather_route)
+#     print (weather_route)
