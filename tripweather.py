@@ -4,11 +4,26 @@ import requests
 import polyline
 from datetime import datetime, timedelta
 import pytz  # To handle time zones
+import openai
 
-# Replace these with your API keys and user agent
-GOOGLE_API_KEY ="AIzaSyDcgsAt28mZ7oH7o7uraizEcqSjqdMAbu0"
-YR_USER_AGENT = "YourApp/1.0 (your.email@example.com)"
-WEATHERAPI_API_KEY = "1338217c93b340b98c981000250501"
+## Function to read API key from a file
+def read_api_key(file_path): 
+    try:
+        with open(file_path, 'r') as file:
+            return file.read().strip()
+    except FileNotFoundError:
+        print(f"Error: File not found - {file_path}")
+        return None
+
+# Read API keys from files
+GOOGLE_API_KEY = read_api_key('../hemligheter/google_api.txt')
+WEATHERAPI_API_KEY = read_api_key('../hemligheter/weather_api.txt')
+OPENAI_API_KEY = read_api_key('../hemligheter/openai_api.txt')
+
+# Print API keys to verify they are read correctly (for debugging purposes)
+print(f"Google API Key: {GOOGLE_API_KEY}")
+print(f"Weather API Key: {WEATHERAPI_API_KEY}")
+print(f"OpenAI API Key: {OPENAI_API_KEY}")
 
 def get_route_data_detailed(origin, destination):
     """
@@ -22,13 +37,13 @@ def get_route_data_detailed(origin, destination):
     }
     
     response = requests.get(url, params=params)
-    response.raise_for_status()
+    if response.status_code != 200:
+        print(f"Error fetching route: {response.json().get('error_message', 'Unknown error')}")
+        return None
+    
     data = response.json()
-    
-    
-    
-    if data["status"] != "OK":
-        print(f"Error fetching route: {data['status']}")
+    if data['status'] != 'OK':
+        print(f"Error fetching route: {data.get('error_message', 'Unknown error')}")
         return None
     
     # Decode the polyline for detailed waypoints
@@ -39,6 +54,24 @@ def get_route_data_detailed(origin, destination):
     
     
     return polyline.decode(polyline_points), steps  # Return steps along with the waypoints
+
+def get_weather_comment(weather_data):
+    """
+    Generate a comment using OpenAI's GPT model.
+    """
+    openai.api_key = OPENAI_API_KEY
+    prompt = f"Provide a short and high level travel comment based on the following weather data, without going into details on all the stops: {weather_data}"
+    response = openai.chat.completions.create(
+        model="gpt-4-turbo",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+    
+    print(response.choices[0].message.content)
+
+    return response.choices[0].message.content
 
 def get_route_data(origin, destination):
     """
@@ -154,6 +187,10 @@ def extract_weatherAPI_details(weather_data):
     precipitation = weather_data.get('precip_mm', None)
     wind_speed = weather_data.get('wind_kph', None)
     
+    #Chaninging the units from kph to mps and rounding it to 1 decimal places
+    if wind_speed is not None:
+        wind_speed = round(wind_speed / 3.6, 1)  # Convert kph to mps and round to 1 decimal place
+            
     return {
         "temperature": temperature,
         "precipitation": precipitation,
@@ -220,7 +257,7 @@ def find_weather_along_route(origin, destination, start_date_time):
                 "Time": current_time.strftime("%Y-%m-%d %H:%M:%S"),
                 "Temperature": weather['temperature'],
                 "Precipitation": weather['precipitation'],
-                "Wind Speed": weather['wind_speed']
+                "WindSpeed": weather['wind_speed']
             }
             # Append the dictionary to the list
             weather_data_list.append(weather_dict)
@@ -232,7 +269,7 @@ def find_weather_along_route(origin, destination, start_date_time):
             #Updating the lat and long of the start waypoint
             lat_start, lng_start = lat, lng
         
-    # print (steps)
+    print (weather_data_list)
     
     return weather_data_list
                     
