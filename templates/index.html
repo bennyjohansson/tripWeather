@@ -35,27 +35,32 @@
         <br>
         <button type="submit">Get Weather</button>
     </form>
-    
-    {% if weather_data %}
+
+    {% if ai_comment %}
+    <h2>AI Comment</h2>
+    <p>{{ ai_comment }}</p>
+    {% endif %}
+  
     <h2>Weather Data</h2>
     <table>
         <tr>
             <th>City</th>
             <th>Time</th>
-            <th>Temperature</th>
-            <th>Precipitation</th>
-            <th>Wind speed</th>
+            <th>Temperature (°C) </th>
+            <th>Precipitation (mm) </th>
+            <th>Wind speed (m/s) </th>
         </tr>
         {% for data in weather_data %}
-        <tr>
-            <td>{{ data['City'] }}</td>
-            <td>{{ data['Time'] }}</td>
-            <td>{{ data['Temperature'] }}</td>
-            <td>{{ data['Precipitation'] }}</td>
-            <td>{{ data['Wind Speed'] }}</td>
-        </tr>
+            <tr>
+                <td>{{ data.City }}</td>
+                <td>{{ data.Time }}</td>
+                <td>{{ data.Temperature }}</td>
+                <td>{{ data.Precipitation }}</td>
+                <td>{{ data.WindSpeed }}</td>
+            </tr>
         {% endfor %}
+        
     </table>
-    {% endif %}
+
 </body>
 </html>
