@@ -49,6 +49,7 @@
             <th>Temperature (°C) </th>
             <th>Precipitation (mm) </th>
             <th>Wind speed (m/s) </th>
+            <th>Weather </th>
         </tr>
         {% for data in weather_data %}
             <tr>
@@ -57,9 +58,10 @@
                 <td>{{ data.Temperature }}</td>
                 <td>{{ data.Precipitation }}</td>
                 <td>{{ data.WindSpeed }}</td>
+                <td><img src="{{ data.IconURL }}" alt="Weather Icon"></td>
             </tr>
         {% endfor %}
-        
+
     </table>
 
 </body>

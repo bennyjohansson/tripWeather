@@ -60,7 +60,7 @@ def get_weather_comment(weather_data):
     Generate a comment using OpenAI's GPT model.
     """
     openai.api_key = OPENAI_API_KEY
-    prompt = f"Provide a short and high level travel comment based on the following weather data, without going into details on all the stops: {weather_data}"
+    prompt = f"Provide a short and high level travel comment based on the following weather data, without going into details on all the stops. However, it there are any indications in the weather forecast that driving can be difficult, such as snowfall, temperatures around 0C or heavy winds, please highligt this. Be quite clean in your comments without unneccessary comments: {weather_data}"
     response = openai.chat.completions.create(
         model="gpt-4-turbo",
         messages=[
@@ -115,47 +115,7 @@ def get_city_name(lat, lng):
 
 from datetime import datetime
 
-def get_yr_weather_data(lat, lng, user_agent, target_time):
-    url = f"https://api.met.no/weatherapi/locationforecast/2.0/compact?lat={lat}&lon={lng}"
-    
-    headers = {
-        "User-Agent": user_agent
-    }
-    
-    response = requests.get(url, headers=headers)
-    
-    if response.status_code != 200:
-        return None  # Handle the error if the response status is not 200
-    
-    weather_data = response.json()
-    # print(weather_data)
-    times = weather_data['properties']['timeseries']
-    
-    # Convert current_time to naive datetime
-    target_time = target_time.replace(tzinfo=None)
-    
-    for time in times:
-        api_time = datetime.strptime(time['time'], "%Y-%m-%dT%H:%M:%SZ")
-        # print(time)
-        
-        # Ensure the time block is greater than or equal to current_time
-        if api_time >= target_time:
-            temperature = time['data']['instant']['details'].get('air_temperature', 0.0)
-            wind_speed = time['data']['instant']['details'].get('wind_speed', 0) #, {}).get('mps', 0.0)
-            precipitation = time['data']['next_1_hours'].get('details', {}).get('precipitation_amount', 0.0)
-            description = time['data']['next_1_hours'].get('summary', "No data")
-            time_of_report = target_time
-            
-            # Return as a dictionary
-            return {
-                "temperature": temperature,
-                "wind_speed": wind_speed,
-                "precipitation": precipitation,
-                "description": description,
-                "time": time_of_report
-            }
-    
-    return None  # If no data found
+
 
 def get_weatherAPI_forecast(lat, lng, date_time):
     date_str = date_time.strftime("%Y-%m-%d")
@@ -187,6 +147,12 @@ def extract_weatherAPI_details(weather_data):
     precipitation = weather_data.get('precip_mm', None)
     wind_speed = weather_data.get('wind_kph', None)
     
+    icon_url = weather_data.get('condition', {}).get('icon', None)
+    
+    # Ensure the icon URL is complete
+    if icon_url and not icon_url.startswith("http"):
+        icon_url = "https:" + icon_url
+    
     #Chaninging the units from kph to mps and rounding it to 1 decimal places
     if wind_speed is not None:
         wind_speed = round(wind_speed / 3.6, 1)  # Convert kph to mps and round to 1 decimal place
@@ -194,7 +160,8 @@ def extract_weatherAPI_details(weather_data):
     return {
         "temperature": temperature,
         "precipitation": precipitation,
-        "wind_speed": wind_speed
+        "wind_speed": wind_speed,
+        "icon_url": icon_url
     }
 
 def find_weather_along_route(origin, destination, start_date_time):
@@ -247,6 +214,7 @@ def find_weather_along_route(origin, destination, start_date_time):
 
             #Getting the city name at the next waypoint
             city = get_city_name(lat, lng)
+            
             #Getting the weather at the next waypoint
             weather = get_weatherAPI_forecast(lat, lng, current_time)
             
@@ -257,7 +225,8 @@ def find_weather_along_route(origin, destination, start_date_time):
                 "Time": current_time.strftime("%Y-%m-%d %H:%M:%S"),
                 "Temperature": weather['temperature'],
                 "Precipitation": weather['precipitation'],
-                "WindSpeed": weather['wind_speed']
+                "WindSpeed": weather['wind_speed'],
+                "IconURL": weather['icon_url']
             }
             # Append the dictionary to the list
             weather_data_list.append(weather_dict)
