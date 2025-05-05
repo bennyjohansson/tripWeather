@@ -5,9 +5,24 @@ import polyline
 from datetime import datetime, timedelta
 import pytz  # To handle time zones
 
-# Replace these with your API keys and user agent
-GOOGLE_API_KEY ="AIzaSyDcgsAt28mZ7oH7o7uraizEcqSjqdMAbu0"
-YR_USER_AGENT = "YourApp/1.0 (your.email@example.com)"
+## Function to read API key from a file
+def read_api_key(file_path): 
+    try:
+        with open(file_path, 'r') as file:
+            return file.read().strip()
+    except FileNotFoundError:
+        print(f"Error: File not found - {file_path}")
+        return None
+
+# Read API keys from files
+GOOGLE_API_KEY = read_api_key('../hemligheter/google_api.txt')
+WEATHERAPI_API_KEY = read_api_key('../hemligheter/weather_api.txt')
+OPENAI_API_KEY = read_api_key('../hemligheter/openai_api.txt')
+
+# Print API keys to verify they are read correctly (for debugging purposes)
+print(f"Google API Key: {GOOGLE_API_KEY}")
+print(f"Weather API Key: {WEATHERAPI_API_KEY}")
+print(f"OpenAI API Key: {OPENAI_API_KEY}")
 
 def get_route_data_detailed(origin, destination):
     """

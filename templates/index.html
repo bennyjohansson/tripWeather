@@ -55,7 +55,7 @@
             <tr>
                 <td>{{ data.City }}</td>
                 <td>{{ data.Time }}</td>
-                <td>{{ data.Temperature }}</td>
+                <td>{{ data.Temperature | round }}</td>
                 <td>{{ data.Precipitation }}</td>
                 <td>{{ data.WindSpeed }}</td>
                 <td><img src="{{ data.IconURL }}" alt="Weather Icon"></td>

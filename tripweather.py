@@ -1,162 +1,262 @@
-
-
 import requests
 import polyline
 from datetime import datetime, timedelta
-import pytz  # To handle time zones
+import pytz
 import openai
+import os
+from typing import Optional, Dict, List, Tuple, Any
+import logging
 
-## Function to read API key from a file
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 def read_api_key(file_path): 
+    """Read API key from a file."""
     try:
         with open(file_path, 'r') as file:
             return file.read().strip()
     except FileNotFoundError:
-        print(f"Error: File not found - {file_path}")
+        logger.error(f"Error: File not found - {file_path}")
         return None
 
-# Read API keys from files
-GOOGLE_API_KEY = read_api_key('../hemligheter/google_api.txt')
-WEATHERAPI_API_KEY = read_api_key('../hemligheter/weather_api.txt')
-OPENAI_API_KEY = read_api_key('../hemligheter/openai_api.txt')
+class Config:
+    """Configuration management class following the principle of separating configuration from code."""
+    _instance = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+    
+    def __init__(self):
+        if not self._initialized:
+            self.GOOGLE_API_KEY = read_api_key('../hemligheter/google_api.txt')
+            self.WEATHERAPI_API_KEY = read_api_key('../hemligheter/weather_api.txt')
+            self.OPENAI_API_KEY = read_api_key('../hemligheter/openai_api.txt')
+            
+            if not all([self.GOOGLE_API_KEY, self.WEATHERAPI_API_KEY, self.OPENAI_API_KEY]):
+                raise ValueError("One or more API keys are missing")
+            
+            self._initialized = True
+    
+    def reset(self):
+        """Reset the configuration instance (useful for testing)."""
+        self._initialized = False
 
-# Print API keys to verify they are read correctly (for debugging purposes)
-print(f"Google API Key: {GOOGLE_API_KEY}")
-print(f"Weather API Key: {WEATHERAPI_API_KEY}")
-print(f"OpenAI API Key: {OPENAI_API_KEY}")
+class APIError(Exception):
+    """Custom exception for API-related errors."""
+    pass
 
-def get_route_data_detailed(origin, destination):
+def get_config() -> Config:
+    """Get the configuration instance."""
+    try:
+        return Config()
+    except ValueError as e:
+        logger.error(f"Configuration error: {e}")
+        raise
+
+def get_route_data_detailed(origin: str, destination: str) -> Tuple[List[Tuple[float, float]], List[Dict[str, Any]]]:
     """
     Fetch route data from Google Maps Directions API and decode waypoints.
+    
+    Args:
+        origin: Starting location
+        destination: Destination location
+        
+    Returns:
+        Tuple containing:
+        - List of (latitude, longitude) tuples
+        - List of route steps
+        
+    Raises:
+        APIError: If there's an error fetching the route data
     """
     url = "https://maps.googleapis.com/maps/api/directions/json"
     params = {
         "origin": origin,
         "destination": destination,
-        "key": GOOGLE_API_KEY
+        "key": get_config().GOOGLE_API_KEY
     }
     
-    response = requests.get(url, params=params)
-    if response.status_code != 200:
-        print(f"Error fetching route: {response.json().get('error_message', 'Unknown error')}")
-        return None
-    
-    data = response.json()
-    if data['status'] != 'OK':
-        print(f"Error fetching route: {data.get('error_message', 'Unknown error')}")
-        return None
-    
-    # Decode the polyline for detailed waypoints
-    polyline_points = data["routes"][0]["overview_polyline"]["points"]
-    polyline_detail = data["routes"][0]["overview_polyline"]
-    steps = data["routes"][0]["legs"][0]["steps"]
-    
-    
-    
-    return polyline.decode(polyline_points), steps  # Return steps along with the waypoints
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data['status'] != 'OK':
+            raise APIError(f"Google Maps API error: {data.get('error_message', 'Unknown error')}")
+        
+        polyline_points = data["routes"][0]["overview_polyline"]["points"]
+        steps = data["routes"][0]["legs"][0]["steps"]
+        
+        return polyline.decode(polyline_points), steps
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error fetching route data: {e}")
+        raise APIError(f"Failed to fetch route data: {e}")
 
-def get_weather_comment(weather_data):
+def get_weather_comment(weather_data: List[Dict[str, Any]]) -> str:
     """
     Generate a comment using OpenAI's GPT model.
-    """
-    openai.api_key = OPENAI_API_KEY
-    prompt = f"Provide a short and high level travel comment based on the following weather data, without going into details on all the stops. However, it there are any indications in the weather forecast that driving can be difficult, such as snowfall, temperatures around 0C or heavy winds, please highligt this. Be quite clean in your comments without unneccessary comments: {weather_data}"
-    response = openai.chat.completions.create(
-        model="gpt-4-turbo",
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": prompt}
-        ]
-    )
     
-    print(response.choices[0].message.content)
-
-    return response.choices[0].message.content
-
-def get_route_data(origin, destination):
+    Args:
+        weather_data: List of weather data dictionaries
+        
+    Returns:
+        Generated weather comment
+        
+    Raises:
+        APIError: If there's an error with the OpenAI API
     """
-    Fetching the route data from Google Maps Directions API and and jsut returning the steps
+    try:
+        client = openai.OpenAI(api_key=get_config().OPENAI_API_KEY)
+        prompt = f"Provide a short and high level travel comment based on the following weather data, without going into details on all the stops. However, if there are any indications in the weather forecast that driving can be difficult, such as snowfall, temperatures around 0C or heavy winds, please highlight this. Be quite clean in your comments without unnecessary comments: {weather_data}"
+        
+        response = client.chat.completions.create(
+            model="gpt-4-turbo-preview",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return response.choices[0].message.content
+        
+    except Exception as e:
+        logger.error(f"Error generating weather comment: {e}")
+        raise APIError(f"Failed to generate weather comment: {e}")
+
+def get_route_data(origin: str, destination: str) -> List[Dict[str, Any]]:
+    """
+    Fetch route data from Google Maps Directions API.
+    
+    Args:
+        origin: Starting location
+        destination: Destination location
+        
+    Returns:
+        List of route steps
+        
+    Raises:
+        APIError: If there's an error fetching the route data
     """
     url = "https://maps.googleapis.com/maps/api/directions/json"
     params = {
         "origin": origin,
         "destination": destination,
-        "key": GOOGLE_API_KEY
+        "key": get_config().GOOGLE_API_KEY
     }
     
-    response = requests.get(url, params=params)
-    response.raise_for_status()
-    data = response.json()
-    
-    if data["status"] != "OK":
-        print(f"Error fetching route: {data['status']}")
-        return None
-    
-    # Decode the polyline for detailed waypoints
-    steps = data["routes"][0]["legs"][0]["steps"]
-    
-    return steps  # Return steps along with the waypoints
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data["status"] != "OK":
+            raise APIError(f"Google Maps API error: {data['status']}")
+        
+        return data["routes"][0]["legs"][0]["steps"]
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error fetching route data: {e}")
+        raise APIError(f"Failed to fetch route data: {e}")
 
-def get_city_name(lat, lng):
-    # Perform the geocode request to get address details based on latitude and longitude
-    geocode_url = f"https://maps.googleapis.com/maps/api/geocode/json?latlng={lat},{lng}&key={GOOGLE_API_KEY}"
-    response = requests.get(geocode_url)
-    geocode_result = response.json()
-
-    # Iterate through the geocode result to find the main city (postal_town)
-    for component in geocode_result.get('results', []):
-        address_components = component.get('address_components', [])
-        for addr_component in address_components:
-            if 'postal_town' in addr_component.get('types', []):
-                return addr_component.get('long_name')
-    
-    # Fallback: if city not found, return a default string or None
-    return "Unknown Location"
-
-from datetime import datetime
-
-
-
-def get_weatherAPI_forecast(lat, lng, date_time):
-    date_str = date_time.strftime("%Y-%m-%d")
-    url = f"http://api.weatherapi.com/v1/forecast.json?key={WEATHERAPI_API_KEY}&q={lat},{lng}&dt={date_str}"
-    response = requests.get(url)
-    
-    if response.status_code != 200:
-        print(f"Error fetching weather data: {response.status_code}")
-        return None
-    
-    forecast_data = response.json()
-    forecast_day = forecast_data.get('forecast', {}).get('forecastday', [])[0]
-    
-    if not forecast_day:
-        return None
-    
-    # Find the closest hour forecast to the specified time
-    closest_hour = min(forecast_day['hour'], key=lambda h: abs(datetime.strptime(h['time'], "%Y-%m-%d %H:%M") - date_time))
-    
-    weather_forecast = extract_weatherAPI_details(closest_hour)
-    
-    return weather_forecast
-
-def extract_weatherAPI_details(weather_data):
+def get_city_name(lat: float, lng: float) -> str:
     """
-    Extract temperature, precipitation, and wind speed from the weather data.
+    Get city name from latitude and longitude coordinates.
+    
+    Args:
+        lat: Latitude coordinate
+        lng: Longitude coordinate
+        
+    Returns:
+        City name or "Unknown Location" if not found
+        
+    Raises:
+        APIError: If there's an error with the geocoding API
+    """
+    try:
+        geocode_url = f"https://maps.googleapis.com/maps/api/geocode/json?latlng={lat},{lng}&key={get_config().GOOGLE_API_KEY}"
+        response = requests.get(geocode_url, timeout=10)
+        response.raise_for_status()
+        geocode_result = response.json()
+        
+        for component in geocode_result.get('results', []):
+            address_components = component.get('address_components', [])
+            for addr_component in address_components:
+                if 'postal_town' in addr_component.get('types', []):
+                    return addr_component.get('long_name')
+        
+        return "Unknown Location"
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error fetching city name: {e}")
+        raise APIError(f"Failed to fetch city name: {e}")
+
+def get_weatherAPI_forecast(lat: float, lng: float, date_time: datetime) -> Optional[Dict[str, Any]]:
+    """
+    Get weather forecast for a specific location and time.
+    
+    Args:
+        lat: Latitude coordinate
+        lng: Longitude coordinate
+        date_time: Date and time for the forecast
+        
+    Returns:
+        Weather forecast data or None if not available
+        
+    Raises:
+        APIError: If there's an error with the weather API
+    """
+    try:
+        date_str = date_time.strftime("%Y-%m-%d")
+        url = f"http://api.weatherapi.com/v1/forecast.json?key={get_config().WEATHERAPI_API_KEY}&q={lat},{lng}&dt={date_str}"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        
+        forecast_data = response.json()
+        forecast_day = forecast_data.get('forecast', {}).get('forecastday', [])[0]
+        
+        if not forecast_day:
+            return None
+        
+        closest_hour = min(
+            forecast_day['hour'],
+            key=lambda h: abs(datetime.strptime(h['time'], "%Y-%m-%d %H:%M") - date_time)
+        )
+        
+        return extract_weatherAPI_details(closest_hour)
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error fetching weather forecast: {e}")
+        raise APIError(f"Failed to fetch weather forecast: {e}")
+
+def extract_weatherAPI_details(weather_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract and format weather details from API response.
+    
+    Args:
+        weather_data: Raw weather data from API
+        
+    Returns:
+        Formatted weather details
     """
     temperature = weather_data.get('temp_c', None)
     precipitation = weather_data.get('precip_mm', None)
     wind_speed = weather_data.get('wind_kph', None)
-    
     icon_url = weather_data.get('condition', {}).get('icon', None)
     
-    # Ensure the icon URL is complete
     if icon_url and not icon_url.startswith("http"):
         icon_url = "https:" + icon_url
     
-    #Chaninging the units from kph to mps and rounding it to 1 decimal places
     if wind_speed is not None:
-        wind_speed = round(wind_speed / 3.6, 1)  # Convert kph to mps and round to 1 decimal place
-            
+        wind_speed = round(wind_speed / 3.6, 1)  # Convert kph to mps
+        
     return {
         "temperature": temperature,
         "precipitation": precipitation,
@@ -164,104 +264,74 @@ def extract_weatherAPI_details(weather_data):
         "icon_url": icon_url
     }
 
-def find_weather_along_route(origin, destination, start_date_time):
+def find_weather_along_route(origin: str, destination: str, start_date_time: datetime) -> List[Dict[str, Any]]:
     """
-    Find main cities along the route with weather details, including the time.
-    - `start_date`: Date when the driver starts (e.g., "2025-01-10").
-    - `start_time`: Time when the driver starts (e.g., "08:30").
+    Find weather conditions along a route at regular intervals.
+    
+    Args:
+        origin: Starting location
+        destination: Destination location
+        start_date_time: Start time of the journey
+        
+    Returns:
+        List of weather data points along the route
+        
+    Raises:
+        APIError: If there's an error fetching route or weather data
     """
-   
-    
-    waypoints, steps = get_route_data_detailed(origin, destination)
-    
-    if not waypoints:
-        return
-    
-    current_time = start_date_time  # Start from the given start time
-    
-    print("Locations and Weather Along the Route:")
-    
-    # Initialize an empty list to store weather data
-    weather_data_list = []
-    
-   
-    #Looping over all the waypoints. I want to split the route in 10 parts and get the city and weather at each of the 10 points at the expexted arrival there. 
-    # To get the arrival time at next waypoint I use the get_route_data function to get the steps and then get the duration and distance to the next waypoint.
-    # I then add the duration to the current time to get the expected arrival time at the next waypoint.
-    # I then get the city name and weather at that time.
-    
-    #getting lat and long of the first waypoint
-    lat_start, lng_start = waypoints[0]
-    total_stops = 10
-    interval = max(1, len(waypoints) // (total_stops - 1))
-    
-    for i, (lat, lng) in enumerate(waypoints):
+    try:
+        waypoints, steps = get_route_data_detailed(origin, destination)
         
-        if i % interval == 0 or i == len(waypoints) - 1:
-            #Getting the route from the start to the current waypoint using the lat_start and lng_start
-            steps = get_route_data(f"{lat_start},{lng_start}", f"{lat},{lng}")
-            
-            #looping over the steps to get the duration and distance to the next waypoint
-            for step in steps:
-                duration = step['duration']['value']
-                distance = step['distance']['value']
+        if not waypoints:
+            return []
+        
+        current_time = start_date_time
+        weather_data_list = []
+        lat_start, lng_start = waypoints[0]
+        total_stops = 10
+        interval = max(1, len(waypoints) // (total_stops - 1))
+        
+        for i, (lat, lng) in enumerate(waypoints):
+            if i % interval == 0 or i == len(waypoints) - 1:
+                steps = get_route_data(f"{lat_start},{lng_start}", f"{lat},{lng}")
                 
-                #printing the duration and distance to the next waypoint
-                # print(f"Duration: {step['duration']} seconds, Distance: {distance} meters")
-                #Adding the duration to the current time to get the expected arrival time at the next waypoint
-                current_time = current_time + timedelta(seconds=duration)
-                #Getting the city name at the next waypoint
-
-            #Getting the city name at the next waypoint
-            city = get_city_name(lat, lng)
-            
-            #Getting the weather at the next waypoint
-            weather = get_weatherAPI_forecast(lat, lng, current_time)
-            
-            
-             #Creating a dictionary with the city and weather and time for the waypoint
-            weather_dict = {
-                "City": city,
-                "Time": current_time.strftime("%Y-%m-%d %H:%M:%S"),
-                "Temperature": weather['temperature'],
-                "Precipitation": weather['precipitation'],
-                "WindSpeed": weather['wind_speed'],
-                "IconURL": weather['icon_url']
-            }
-            # Append the dictionary to the list
-            weather_data_list.append(weather_dict)
-            
-            
-            #printing the dictionary
-            # print(weather_dict)
-            
-            #Updating the lat and long of the start waypoint
-            lat_start, lng_start = lat, lng
-        
-    print (weather_data_list)
-    
-    return weather_data_list
-                    
+                for step in steps:
+                    duration = step['duration']['value']
+                    current_time = current_time + timedelta(seconds=duration)
                 
+                city = get_city_name(lat, lng)
+                weather = get_weatherAPI_forecast(lat, lng, current_time)
+                
+                if weather:
+                    weather_dict = {
+                        "City": city,
+                        "Time": current_time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "Temperature": weather['temperature'],
+                        "Precipitation": weather['precipitation'],
+                        "WindSpeed": weather['wind_speed'],
+                        "IconURL": weather['icon_url']
+                    }
+                    weather_data_list.append(weather_dict)
+                
+                lat_start, lng_start = lat, lng
         
+        return weather_data_list
+        
+    except Exception as e:
+        logger.error(f"Error finding weather along route: {e}")
+        raise APIError(f"Failed to find weather along route: {e}")
 
-# Example usage
-# if __name__ == "__main__":
-#     origin = "Sundsvall, Sweden"
-#     destination = "Vilans Väg 5a, Danderyd, Sweden"
-#     start_date = "2025-01-06"  # Specify the start date here
-#     start_time = "09:00"  # Specify the start time here
-    
-#     waypoints, steps = get_route_data_detailed(origin, destination)
-
-#     #Printing the name of the city at the last waypoint
-#     lat, lng = waypoints[-1]
-#     print(f"Lat: {lat}, Lng: {lng}")
-#     # city = get_city_name(lat, lng)
-#     # print(f"City at the last waypoint: {city}")
-    
-#     #converting the start date and start time to a datetime object
-#     start_time = datetime(2025,1,6,10,0)
-#     weather_route = find_weather_along_route(origin, destination, start_time)
-    
-#     print (weather_route)
+if __name__ == "__main__":
+    # Example usage
+    try:
+        test_origin = "Sundsvall, Sweden"
+        test_destination = "Stockholm, Sweden"
+        test_start_time = datetime.now()
+        
+        weather_data = find_weather_along_route(test_origin, test_destination, test_start_time)
+        print(weather_data)
+        
+    except APIError as e:
+        logger.error(f"API Error: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
